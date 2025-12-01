@@ -30,6 +30,11 @@ from .monitoring import (
     TrainingMonitor,
     compare_schedules
 )
+from .evaluation import (
+    PhysicsEvaluator,
+    BaselineComparator,
+    evaluate_model_comprehensive
+)
 
 __all__ = [
     'find_time_list',
@@ -50,5 +55,8 @@ __all__ = [
     'ScheduleType',
     'get_recommended_schedule',
     'TrainingMonitor',
-    'compare_schedules'
+    'compare_schedules',
+    'PhysicsEvaluator',
+    'BaselineComparator',
+    'evaluate_model_comprehensive'
 ]
