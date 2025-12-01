@@ -24,7 +24,8 @@ from .hierarchical_adaptive import (
 
 from .integrated_loss import (
     PUPHAWLoss,
-    PUPHAWUnsupervisedLoss
+    PUPHAWUnsupervisedLoss,
+    PUPHAWHybridLoss
 )
 
 from .multi_physics_loss import (
@@ -58,5 +59,6 @@ __all__ = [
 
     # 統合損失関数
     'PUPHAWLoss',
-    'PUPHAWUnsupervisedLoss'
+    'PUPHAWUnsupervisedLoss',
+    'PUPHAWHybridLoss'
 ]
