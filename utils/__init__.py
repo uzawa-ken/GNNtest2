@@ -30,6 +30,18 @@ from .monitoring import (
     TrainingMonitor,
     compare_schedules
 )
+from .evaluation import (
+    PhysicsEvaluator,
+    BaselineComparator,
+    evaluate_model_comprehensive
+)
+from .visualization import (
+    plot_solution_field,
+    plot_weight_distribution,
+    plot_ablation_results,
+    create_training_animation,
+    generate_paper_figures
+)
 
 __all__ = [
     'find_time_list',
@@ -50,5 +62,13 @@ __all__ = [
     'ScheduleType',
     'get_recommended_schedule',
     'TrainingMonitor',
-    'compare_schedules'
+    'compare_schedules',
+    'PhysicsEvaluator',
+    'BaselineComparator',
+    'evaluate_model_comprehensive',
+    'plot_solution_field',
+    'plot_weight_distribution',
+    'plot_ablation_results',
+    'create_training_animation',
+    'generate_paper_figures'
 ]
