@@ -204,9 +204,10 @@ class PUPHAWUnsupervisedLoss(nn.Module):
     """
     PUP-HAW Unsupervised Loss
 
-    完全教師なし学習版（Phase 6で使用）
+    完全教師なし学習版（Phase 4-6で使用）
 
     教師データを使わず、物理制約のみで学習します。
+    Phase 4のマルチ物理制約を統合しています。
 
     Parameters
     ----------
@@ -214,12 +215,25 @@ class PUPHAWUnsupervisedLoss(nn.Module):
         メッシュ品質重み設定
     hierarchical_config : dict, optional
         階層的適応設定
-    boundary_info : dict, optional
-        境界条件情報
+    boundary_types : dict, optional
+        境界条件タイプ情報 {'inlet': mask, 'outlet': mask, 'wall': mask, ...}
+    bc_values : dict, optional
+        境界条件値 {'inlet': value, 'outlet': value, ...}
+    ic_values : torch.Tensor, optional
+        初期条件値
+    conservation_type : str, optional
+        保存則タイプ ('mass', 'momentum', 'energy')
 
     Examples
     --------
-    >>> loss_fn = PUPHAWUnsupervisedLoss(boundary_info=boundary_info)
+    >>> from utils.mesh_analysis import extract_boundary_nodes, classify_boundary_types
+    >>> boundary_mask = extract_boundary_nodes(edge_index, num_nodes)
+    >>> boundary_types = classify_boundary_types(edge_index, boundary_mask)
+    >>> bc_values = {'inlet': 0.1, 'outlet': 0.0}
+    >>> loss_fn = PUPHAWUnsupervisedLoss(
+    ...     boundary_types=boundary_types,
+    ...     bc_values=bc_values
+    ... )
     >>> for epoch in range(num_epochs):
     ...     pred = model(x, edge_index)
     ...     loss, info = loss_fn(
@@ -232,7 +246,10 @@ class PUPHAWUnsupervisedLoss(nn.Module):
         self,
         mesh_quality_config=None,
         hierarchical_config=None,
-        boundary_info=None,
+        boundary_types=None,
+        bc_values=None,
+        ic_values=None,
+        conservation_type='mass',
         use_topology_propagation=True,
         topology_config=None
     ):
@@ -256,42 +273,33 @@ class PUPHAWUnsupervisedLoss(nn.Module):
             **hierarchical_config
         )
 
-        # 境界条件情報
-        self.boundary_info = boundary_info or {}
+        # Phase 4: マルチ物理制約損失
+        from .multi_physics_loss import (
+            BoundaryConditionLoss,
+            InitialConditionLoss,
+            ConservationLoss
+        )
+
+        # デフォルトの境界タイプ（空のマスク）
+        if boundary_types is None:
+            num_nodes = 1  # ダミー、実際は forward で更新
+            device = torch.device('cpu')
+            boundary_types = {
+                'inlet': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'outlet': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'wall': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'symmetry': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+            }
+
+        self.bc_loss = BoundaryConditionLoss(boundary_types, bc_values)
+        self.ic_loss = InitialConditionLoss(ic_values)
+        self.cons_loss = ConservationLoss(conservation_type)
 
         # トポロジー伝播
         self.use_topology_propagation = use_topology_propagation
         if topology_config is None:
             topology_config = {'num_hops': 2, 'decay_factor': 0.5}
         self.topology_config = topology_config
-
-    def compute_boundary_loss(self, pred):
-        """境界条件損失を計算"""
-        if not self.boundary_info:
-            return torch.tensor(0.0, device=pred.device)
-
-        loss_bc = 0.0
-
-        # ディリクレ境界条件
-        if 'dirichlet_nodes' in self.boundary_info:
-            nodes = self.boundary_info['dirichlet_nodes']
-            values = self.boundary_info['dirichlet_values']
-            loss_bc = F.mse_loss(pred[nodes], values)
-
-        # ノイマン境界条件（将来の拡張）
-        # ...
-
-        return loss_bc
-
-    def compute_conservation_loss(self, pred, edge_index):
-        """保存則損失を計算"""
-        from utils.graph_ops import compute_graph_laplacian
-
-        # 質量保存（連続の式）: ∇·u ≈ 0
-        divergence = compute_graph_laplacian(pred, edge_index)
-        loss_conservation = (divergence ** 2).mean()
-
-        return loss_conservation
 
     def forward(
         self,
@@ -301,10 +309,12 @@ class PUPHAWUnsupervisedLoss(nn.Module):
         b,
         edge_index,
         epoch,
+        ic_mask=None,
+        bc_values=None,
         return_gradients=False
     ):
         """
-        教師なし損失を計算
+        教師なし損失を計算（Phase 4統合版）
 
         Parameters
         ----------
@@ -320,6 +330,10 @@ class PUPHAWUnsupervisedLoss(nn.Module):
             エッジリスト
         epoch : int
             エポック
+        ic_mask : torch.Tensor, optional
+            初期条件マスク [num_nodes]
+        bc_values : dict, optional
+            境界条件値 (オプション、デフォルト値を上書き)
         return_gradients : bool, optional
             勾配を返すか
 
@@ -330,7 +344,7 @@ class PUPHAWUnsupervisedLoss(nn.Module):
         info : dict
             損失情報
         """
-        # メッシュ品質重み
+        # Level 3: セル単位のメッシュ品質重み（Phase 2）
         w_cell = self.mesh_quality_weight(feats, pred, edge_index)
 
         if self.use_topology_propagation:
@@ -338,32 +352,56 @@ class PUPHAWUnsupervisedLoss(nn.Module):
                 w_cell, edge_index, **self.topology_config
             )
 
-        # PDE残差損失
+        # PDE残差損失（重み付き）
         residual = matvec_csr_torch(
             A_csr['row_ptr'], A_csr['col_ind'],
             A_csr['vals'], A_csr['row_idx'], pred
         ) - b
         loss_pde = (w_cell * residual ** 2).mean()
 
-        # 境界条件損失
-        loss_bc = self.compute_boundary_loss(pred)
+        # Phase 4: マルチ物理制約損失
 
-        # 保存則損失
-        loss_conservation = self.compute_conservation_loss(pred, edge_index)
+        # 境界条件損失（Dirichlet & Neumann）
+        loss_bc, bc_dict = self.bc_loss(pred, edge_index, bc_values)
 
-        # 初期条件損失（タイムステップがある場合）
-        loss_ic = torch.tensor(0.0, device=pred.device)  # Phase 6で実装
+        # 初期条件損失
+        if ic_mask is not None and ic_mask.sum() > 0:
+            loss_ic = self.ic_loss(pred, ic_mask)
+        else:
+            loss_ic = torch.tensor(0.0, device=pred.device)
 
-        # Level 1適応
+        # 保存則損失（質量保存など）
+        loss_conservation, cons_dict = self.cons_loss(pred, edge_index, feats)
+
+        # Level 1: エポック単位適応（Phase 3）
         current_losses = {
             'pde': loss_pde.item(),
-            'bc': loss_bc.item() if isinstance(loss_bc, torch.Tensor) else loss_bc,
-            'ic': loss_ic.item() if isinstance(loss_ic, torch.Tensor) else loss_ic,
+            'bc': loss_bc.item(),
+            'ic': loss_ic.item(),
             'conservation': loss_conservation.item()
         }
         self.hierarchical_adaptive.update_level1_epoch(epoch, current_losses)
 
-        # 最終重み
+        # Level 2: バッチ単位勾配調和（オプション）
+        if return_gradients:
+            # 各制約の勾配を計算
+            gradients = {}
+            for name, loss_val in [
+                ('pde', loss_pde),
+                ('bc', loss_bc),
+                ('ic', loss_ic),
+                ('conservation', loss_conservation)
+            ]:
+                if loss_val.requires_grad:
+                    grad = torch.autograd.grad(
+                        loss_val, pred, retain_graph=True, create_graph=False
+                    )[0]
+                    gradients[name] = grad.flatten()
+
+            if len(gradients) > 1:
+                self.hierarchical_adaptive.update_level2_batch(gradients)
+
+        # 最終的な適応重み（Level 1 & 2統合）
         lambdas = self.hierarchical_adaptive.get_lambdas()
 
         # 総損失
@@ -374,15 +412,22 @@ class PUPHAWUnsupervisedLoss(nn.Module):
             lambdas['conservation'] * loss_conservation
         )
 
+        # 詳細情報
         info = {
             'loss_pde': loss_pde.item(),
-            'loss_bc': loss_bc.item() if isinstance(loss_bc, torch.Tensor) else loss_bc,
-            'loss_ic': loss_ic.item() if isinstance(loss_ic, torch.Tensor) else loss_ic,
+            'loss_bc': loss_bc.item(),
+            'loss_ic': loss_ic.item(),
             'loss_conservation': loss_conservation.item(),
             'loss_total': loss_total.item(),
             'lambdas': lambdas,
             'w_cell_mean': w_cell.mean().item(),
+            'w_cell_max': w_cell.max().item(),
+            'w_cell_min': w_cell.min().item(),
             'stats': self.hierarchical_adaptive.get_stats()
         }
+
+        # 境界条件と保存則の詳細も追加
+        info.update({f'bc_{k}': v.item() for k, v in bc_dict.items()})
+        info.update({f'cons_{k}': v.item() for k, v in cons_dict.items()})
 
         return loss_total, info

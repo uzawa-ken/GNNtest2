@@ -13,6 +13,13 @@ from .graph_ops import (
     topology_aware_weight_propagation,
     compute_node_degree
 )
+from .mesh_analysis import (
+    extract_boundary_nodes,
+    classify_boundary_types,
+    extract_initial_condition_nodes,
+    compute_mesh_quality_metrics,
+    analyze_mesh_topology
+)
 
 __all__ = [
     'find_time_list',
@@ -22,5 +29,10 @@ __all__ = [
     'compute_graph_gradient',
     'compute_gradient_magnitude',
     'topology_aware_weight_propagation',
-    'compute_node_degree'
+    'compute_node_degree',
+    'extract_boundary_nodes',
+    'classify_boundary_types',
+    'extract_initial_condition_nodes',
+    'compute_mesh_quality_metrics',
+    'analyze_mesh_topology'
 ]

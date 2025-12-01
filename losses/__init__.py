@@ -27,6 +27,13 @@ from .integrated_loss import (
     PUPHAWUnsupervisedLoss
 )
 
+from .multi_physics_loss import (
+    BoundaryConditionLoss,
+    InitialConditionLoss,
+    ConservationLoss,
+    MultiPhysicsLoss
+)
+
 __all__ = [
     # ベースライン（既存実装）
     'build_w_pde_from_feats',
@@ -42,6 +49,12 @@ __all__ = [
     'HierarchicalAdaptiveWeighting',
     'MultiPhysicsHierarchicalAdaptiveWeighting',
     'compute_gradient_statistics',
+
+    # Phase 4: マルチ物理制約
+    'BoundaryConditionLoss',
+    'InitialConditionLoss',
+    'ConservationLoss',
+    'MultiPhysicsLoss',
 
     # 統合損失関数
     'PUPHAWLoss',
