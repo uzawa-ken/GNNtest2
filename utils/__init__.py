@@ -35,6 +35,13 @@ from .evaluation import (
     BaselineComparator,
     evaluate_model_comprehensive
 )
+from .visualization import (
+    plot_solution_field,
+    plot_weight_distribution,
+    plot_ablation_results,
+    create_training_animation,
+    generate_paper_figures
+)
 
 __all__ = [
     'find_time_list',
@@ -58,5 +65,10 @@ __all__ = [
     'compare_schedules',
     'PhysicsEvaluator',
     'BaselineComparator',
-    'evaluate_model_comprehensive'
+    'evaluate_model_comprehensive',
+    'plot_solution_field',
+    'plot_weight_distribution',
+    'plot_ablation_results',
+    'create_training_animation',
+    'generate_paper_figures'
 ]
