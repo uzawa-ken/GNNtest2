@@ -1,10 +1,129 @@
-# GNN for PDE Solving
+# PUP-HAW-U: Physics-based Uncertainty Propagation with Hierarchical Adaptive Weighting (Unsupervised)
 
-計算流体力学（CFD）シミュレーションの偏微分方程式（PDE）を解くためのグラフニューラルネットワーク（GNN）実装です。メッシュ品質による重み付け損失関数を使用しています。
+計算流体力学（CFD）シミュレーションの偏微分方程式（PDE）を解くためのグラフニューラルネットワーク（GNN）実装です。メッシュ品質による適応的重み付けと完全教師なし学習をサポートしています。
 
 ## 概要
 
 このプロジェクトは、CFDシミュレーションから得られる圧力方程式（pEqn）の解を予測するGraphSAGEニューラルネットワークを訓練します。モデルは、データ駆動学習と物理学に基づく制約を組み合わせ、メッシュ品質メトリクスを使用して計算領域の異なる領域における物理的整合性の重要度を重み付けします。
+
+**実装済みのフェーズ:**
+- **Phase 1**: Baseline SimpleSAGE model
+- **Phase 2**: Physics-based uncertainty propagation with mesh quality weighting
+- **Phase 3**: Hierarchical adaptive weighting (Level 0-2)
+- **Phase 4**: Multi-physics constraints (PDE + BC + IC + Conservation laws)
+- **Phase 5**: Hybrid learning with curriculum scheduling
+- **Phase 6**: Fully unsupervised learning
+- **Phase 7**: Experimental framework and ablation study
+
+詳細は [PAPER_OUTLINE.md](./PAPER_OUTLINE.md) を参照してください。
+
+---
+
+## 🚀 クイックスタート / Quick Start
+
+### データローディングの検証
+
+まず、CFDデータが正しくロードできるか確認します：
+
+```bash
+cd /path/to/GNNtest2
+python test_data_loading.py
+```
+
+**成功時の出力:**
+```
+============================================================
+Testing Original Data Format
+============================================================
+✓ Found 100 time steps
+✓ Data loaded successfully!
+  Features shape: (4800, 13)
+  Solution shape: (4800,)
+============================================================
+✓ DATA LOADING TEST PASSED!
+============================================================
+```
+
+### Phase 1 Baseline の実行
+
+データローディングが成功したら、Phase 1のベースラインモデルを訓練します：
+
+```bash
+cd experiments
+python train_baseline.py --data_dir ../../cylinder/work/data/gnn --rank_str 0 --epochs 10
+```
+
+---
+
+## ⚠️ トラブルシューティング / Troubleshooting
+
+### エラー1: "NameError" または "find_time_list() missing required argument"
+
+**症状:**
+```python
+Traceback (most recent call last):
+  File "test_data_loading.py", line 15, in <module>
+    time_list = find_time_list(data_dir)
+TypeError: find_time_list() missing 1 required positional argument: 'rank_str'
+```
+
+**原因:** データローダーの関数は `rank_str` パラメータを必要とします。
+
+**解決策:** 最新の `test_data_loading.py` を使用してください。このスクリプトはランクを自動検出します。
+
+---
+
+### エラー2: "No time steps found!"
+
+**原因:** ファイル命名規則が期待される形式と異なる
+
+**確認事項:**
+1. ファイル名が `pEqn_{time}_rank{rank}.dat` の形式か確認
+2. 同じディレクトリに `x_{time}_rank{rank}.dat` と `A_csr_{time}.dat` が存在するか確認
+
+```bash
+# データディレクトリを確認
+ls -l your_data_directory/ | grep -E "(pEqn|x_|A_csr)"
+
+# 期待される出力例:
+# pEqn_0.001_rank0.dat
+# x_0.001_rank0.dat
+# A_csr_0.001.dat
+```
+
+**ランク番号の特定:**
+```bash
+# ファイル名からランク番号を確認
+ls your_data_directory/pEqn_*_rank*.dat | head -1
+# 例: pEqn_0.001_rank0.dat → rank_str = "0"
+```
+
+---
+
+### エラー3: 並列計算データ（processor*/gnn/）の統合
+
+CFDソルバーを並列実行した場合、データが `processor0/gnn/`, `processor1/gnn/`, ... のように分散している可能性があります。
+
+**方法1: シンボリックリンクで統合（推奨）**
+```bash
+mkdir -p merged_data
+ln -s ../processor0/gnn/* merged_data/
+# または、特定のrank のみ
+ln -s ../processor0/gnn/pEqn_*_rank0.dat merged_data/
+ln -s ../processor0/gnn/x_*_rank0.dat merged_data/
+ln -s ../processor0/gnn/A_csr_*.dat merged_data/
+```
+
+**方法2: データをコピー**
+```bash
+mkdir -p merged_data
+cp processor*/gnn/*_rank0.dat merged_data/
+cp processor*/gnn/A_csr_*.dat merged_data/
+```
+
+その後、`merged_data/` を `--data_dir` として指定します。
+
+---
 
 ## 主な機能
 
