@@ -16,6 +16,17 @@ from .physics_based_weights import (
     compute_adaptive_reference_values
 )
 
+from .hierarchical_adaptive import (
+    HierarchicalAdaptiveWeighting,
+    MultiPhysicsHierarchicalAdaptiveWeighting,
+    compute_gradient_statistics
+)
+
+from .integrated_loss import (
+    PUPHAWLoss,
+    PUPHAWUnsupervisedLoss
+)
+
 __all__ = [
     # ベースライン（既存実装）
     'build_w_pde_from_feats',
@@ -25,5 +36,14 @@ __all__ = [
     # Phase 2: 物理的不確実性伝播
     'PhysicsBasedMeshQualityWeight',
     'LearnableMeshQualityWeight',
-    'compute_adaptive_reference_values'
+    'compute_adaptive_reference_values',
+
+    # Phase 3: 階層的適応
+    'HierarchicalAdaptiveWeighting',
+    'MultiPhysicsHierarchicalAdaptiveWeighting',
+    'compute_gradient_statistics',
+
+    # 統合損失関数
+    'PUPHAWLoss',
+    'PUPHAWUnsupervisedLoss'
 ]
