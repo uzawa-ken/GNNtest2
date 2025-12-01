@@ -20,6 +20,16 @@ from .mesh_analysis import (
     compute_mesh_quality_metrics,
     analyze_mesh_topology
 )
+from .scheduling import (
+    CurriculumScheduler,
+    AdaptiveCurriculumScheduler,
+    ScheduleType,
+    get_recommended_schedule
+)
+from .monitoring import (
+    TrainingMonitor,
+    compare_schedules
+)
 
 __all__ = [
     'find_time_list',
@@ -34,5 +44,11 @@ __all__ = [
     'classify_boundary_types',
     'extract_initial_condition_nodes',
     'compute_mesh_quality_metrics',
-    'analyze_mesh_topology'
+    'analyze_mesh_topology',
+    'CurriculumScheduler',
+    'AdaptiveCurriculumScheduler',
+    'ScheduleType',
+    'get_recommended_schedule',
+    'TrainingMonitor',
+    'compare_schedules'
 ]

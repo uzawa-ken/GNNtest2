@@ -431,3 +431,224 @@ class PUPHAWUnsupervisedLoss(nn.Module):
         info.update({f'cons_{k}': v.item() for k, v in cons_dict.items()})
 
         return loss_total, info
+
+
+class PUPHAWHybridLoss(nn.Module):
+    """
+    PUP-HAW Hybrid Loss (Phase 5)
+
+    Combines supervised and unsupervised losses with curriculum scheduling
+    for gradual transition from supervised to unsupervised learning.
+
+    Parameters
+    ----------
+    mesh_quality_config : dict, optional
+        メッシュ品質重み設定
+    hierarchical_config : dict, optional
+        階層的適応設定
+    boundary_types : dict, optional
+        境界条件タイプ情報
+    bc_values : dict, optional
+        境界条件値
+    ic_values : torch.Tensor, optional
+        初期条件値
+    conservation_type : str, optional
+        保存則タイプ
+    use_topology_propagation : bool, optional
+        トポロジー伝播を使用するか
+
+    Examples
+    --------
+    >>> from utils.scheduling import CurriculumScheduler
+    >>> scheduler = CurriculumScheduler('exponential', total_epochs=100)
+    >>> loss_fn = PUPHAWHybridLoss(boundary_types=boundary_types)
+    >>> for epoch in range(100):
+    ...     lambda_data = scheduler.get_lambda_data(epoch)
+    ...     pred = model(x, edge_index)
+    ...     loss, info = loss_fn(
+    ...         pred, target, feats, A_csr, b, edge_index,
+    ...         epoch, lambda_data=lambda_data
+    ...     )
+    ...     loss.backward()
+    """
+
+    def __init__(
+        self,
+        mesh_quality_config=None,
+        hierarchical_config=None,
+        boundary_types=None,
+        bc_values=None,
+        ic_values=None,
+        conservation_type='mass',
+        use_topology_propagation=True,
+        topology_config=None
+    ):
+        super().__init__()
+
+        # Supervised loss component (PUP-HAW)
+        if mesh_quality_config is None:
+            mesh_quality_config = {}
+
+        self.mesh_quality_weight = PhysicsBasedMeshQualityWeight(
+            **mesh_quality_config
+        )
+
+        # Unsupervised loss components (Phase 4)
+        from .multi_physics_loss import (
+            BoundaryConditionLoss,
+            InitialConditionLoss,
+            ConservationLoss
+        )
+        from .hierarchical_adaptive import MultiPhysicsHierarchicalAdaptiveWeighting
+
+        # Hierarchical adaptive weighting for all constraints
+        if hierarchical_config is None:
+            hierarchical_config = {}
+
+        self.hierarchical_adaptive = MultiPhysicsHierarchicalAdaptiveWeighting(
+            **hierarchical_config
+        )
+
+        # Boundary/IC/Conservation losses
+        if boundary_types is None:
+            num_nodes = 1
+            device = torch.device('cpu')
+            boundary_types = {
+                'inlet': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'outlet': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'wall': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+                'symmetry': torch.zeros(num_nodes, dtype=torch.bool, device=device),
+            }
+
+        self.bc_loss = BoundaryConditionLoss(boundary_types, bc_values)
+        self.ic_loss = InitialConditionLoss(ic_values)
+        self.cons_loss = ConservationLoss(conservation_type)
+
+        # Topology propagation
+        self.use_topology_propagation = use_topology_propagation
+        if topology_config is None:
+            topology_config = {'num_hops': 2, 'decay_factor': 0.5}
+        self.topology_config = topology_config
+
+    def forward(
+        self,
+        pred,
+        target,
+        feats,
+        A_csr,
+        b,
+        edge_index,
+        epoch,
+        lambda_data=1.0,
+        ic_mask=None,
+        bc_values=None,
+        return_gradients=False
+    ):
+        """
+        Compute hybrid loss (supervised + unsupervised).
+
+        Parameters
+        ----------
+        pred : torch.Tensor
+            予測値
+        target : torch.Tensor
+            教師データ
+        feats : torch.Tensor
+            ノード特徴量
+        A_csr : dict
+            CSR行列
+        b : torch.Tensor
+            右辺ベクトル
+        edge_index : torch.Tensor
+            エッジリスト
+        epoch : int
+            エポック
+        lambda_data : float, optional
+            教師あり損失の重み（カリキュラム学習で制御）
+        ic_mask : torch.Tensor, optional
+            初期条件マスク
+        bc_values : dict, optional
+            境界条件値
+        return_gradients : bool, optional
+            勾配を返すか
+
+        Returns
+        -------
+        loss_total : torch.Tensor
+            総損失
+        info : dict
+            損失情報
+        """
+        # Level 3: セル単位のメッシュ品質重み（Phase 2）
+        w_cell = self.mesh_quality_weight(feats, pred, edge_index)
+
+        if self.use_topology_propagation:
+            w_cell = topology_aware_weight_propagation(
+                w_cell, edge_index, **self.topology_config
+            )
+
+        # Supervised component: データ損失
+        loss_data = F.mse_loss(pred, target)
+
+        # PDE残差損失（重み付き）
+        residual = matvec_csr_torch(
+            A_csr['row_ptr'], A_csr['col_ind'],
+            A_csr['vals'], A_csr['row_idx'], pred
+        ) - b
+        loss_pde = (w_cell * residual ** 2).mean()
+
+        # Unsupervised components: 境界条件・初期条件・保存則
+        loss_bc, bc_dict = self.bc_loss(pred, edge_index, bc_values)
+
+        if ic_mask is not None and ic_mask.sum() > 0:
+            loss_ic = self.ic_loss(pred, ic_mask)
+        else:
+            loss_ic = torch.tensor(0.0, device=pred.device)
+
+        loss_conservation, cons_dict = self.cons_loss(pred, edge_index, feats)
+
+        # Hierarchical adaptive weighting (Phase 3)
+        # All constraints: data, pde, bc, ic, conservation
+        current_losses = {
+            'data': loss_data.item(),
+            'pde': loss_pde.item(),
+            'bc': loss_bc.item(),
+            'ic': loss_ic.item(),
+            'conservation': loss_conservation.item()
+        }
+        self.hierarchical_adaptive.update_level1_epoch(epoch, current_losses)
+
+        # Get adaptive weights for physics constraints
+        lambdas = self.hierarchical_adaptive.get_lambdas()
+
+        # Hybrid loss: curriculum-weighted supervised + adaptive unsupervised
+        # lambda_data controls transition: 1.0 (fully supervised) → 0.0 (fully unsupervised)
+        loss_total = (
+            lambda_data * lambdas.get('data', 1.0) * loss_data +
+            lambdas['pde'] * loss_pde +
+            lambdas['bc'] * loss_bc +
+            lambdas['ic'] * loss_ic +
+            lambdas['conservation'] * loss_conservation
+        )
+
+        # Detailed info
+        info = {
+            'loss_data': loss_data.item(),
+            'loss_pde': loss_pde.item(),
+            'loss_bc': loss_bc.item(),
+            'loss_ic': loss_ic.item(),
+            'loss_conservation': loss_conservation.item(),
+            'loss_total': loss_total.item(),
+            'lambda_data_curriculum': lambda_data,  # Curriculum weight
+            'lambdas_adaptive': lambdas,  # Hierarchical adaptive weights
+            'w_cell_mean': w_cell.mean().item(),
+            'w_cell_max': w_cell.max().item(),
+            'w_cell_min': w_cell.min().item(),
+            'stats': self.hierarchical_adaptive.get_stats()
+        }
+
+        # BC and conservation details
+        info.update({f'bc_{k}': v.item() for k, v in bc_dict.items()})
+        info.update({f'cons_{k}': v.item() for k, v in cons_dict.items()})
+
+        return loss_total, info
