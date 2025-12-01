@@ -14,51 +14,33 @@ import os
 import numpy as np
 
 
-def find_time_list(data_dir: str, rank_str: str):
+# utils/data_loader.py の find_time_list() 関数
+# processor*/gnn 構造に対応しているか確認
+
+# もし並列計算結果の場合、以下のように修正が必要かもしれません：
+def find_time_list(case_dir):
     """
-    データディレクトリから利用可能なタイムステップを自動検出
-
-    pEqn_*_rank{rank_str}.dat のパターンに一致するファイルを探し、
-    対応する x_*.dat と A_csr_*.dat が存在するタイムステップのリストを返す。
-
-    Parameters
-    ----------
-    data_dir : str
-        データディレクトリのパス
-    rank_str : str
-        MPIランク識別子（例: "7"）
-
-    Returns
-    -------
-    list of str
-        タイムステップ文字列のリスト（数値順にソート）
-
-    Examples
-    --------
-    >>> times = find_time_list("./gnn", "7")
-    >>> print(times[:3])
-    ['0.001', '0.002', '0.003']
+    Find available time steps in case directory.
+    Handles both serial (gnn/) and parallel (processor*/gnn/) structures.
     """
-    times = []
-    for fn in os.listdir(data_dir):
-        if not fn.startswith("pEqn_"):
-            continue
-        if not fn.endswith(f"_rank{rank_str}.dat"):
-            continue
+    case_path = Path(case_dir)
+    time_dirs = set()
+    
+    # Serial case: gnn/ directory
+    gnn_dir = case_path / 'gnn'
+    if gnn_dir.exists():
+        for f in gnn_dir.glob('pEqn_*'):
+            time_str = f.name.split('_')[1]
+            time_dirs.add(time_str)
+    
+    # Parallel case: processor*/gnn/ directories
+    for proc_dir in case_path.glob('processor*/gnn'):
+        for f in proc_dir.glob('pEqn_*'):
+            time_str = f.name.split('_')[1]
+            time_dirs.add(time_str)
+    
+    return sorted(time_dirs, key=lambda x: float(x))
 
-        # ファイル名から時刻文字列を抽出
-        core = fn[len("pEqn_") : -len(f"_rank{rank_str}.dat")]
-        time_str = core
-
-        # 対応するファイルが存在するか確認
-        x_path   = os.path.join(data_dir, f"x_{time_str}_rank{rank_str}.dat")
-        csr_path = os.path.join(data_dir, f"A_csr_{time_str}.dat")
-        if os.path.exists(x_path) and os.path.exists(csr_path):
-            times.append(time_str)
-
-    # 数値順にソート
-    times = sorted(set(times), key=lambda s: float(s))
-    return times
 
 
 def load_case_with_csr(data_dir: str, time_str: str, rank_str: str):
