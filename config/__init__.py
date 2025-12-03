@@ -1,7 +1,7 @@
 """
 Configuration module
 
-×í¸§¯È-š
+è¨­å®šãƒ¢ã‚¸ãƒ¥ãƒ¼ãƒ«
 """
 
 from .base_config import (
