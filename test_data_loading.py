@@ -32,7 +32,7 @@ def test_original_format():
     print("="*60)
 
     # Adjust these paths to your actual data location
-    data_dir = "../processor7/gnn"  # Path to your gnn directory
+    data_dir = "./gnn"  # Path to your gnn directory
     rank_str = "7"  # Your rank string (check your file names)
 
     print(f"Data directory: {data_dir}")
@@ -142,7 +142,7 @@ def find_correct_rank():
     """
     Auto-detect the correct rank string from file names.
     """
-    data_dir = "../processor7/gnn"
+    data_dir = "./gnn"
 
     if not Path(data_dir).exists():
         print(f"Directory not found: {data_dir}")
