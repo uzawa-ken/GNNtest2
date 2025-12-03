@@ -12,34 +12,67 @@ CFDシミュレーションデータのローディング
 
 import os
 import numpy as np
+# utils/data_loader.py
 
+from pathlib import Path
+from typing import List
 
-# utils/data_loader.py の find_time_list() 関数
-# processor*/gnn 構造に対応しているか確認
-
-# もし並列計算結果の場合、以下のように修正が必要かもしれません：
-def find_time_list(case_dir):
+def find_time_list(case_dir: str) -> List[str]:
     """
-    Find available time steps in case directory.
-    Handles both serial (gnn/) and parallel (processor*/gnn/) structures.
+    推奨実装：
+    - まず rank 付きファイル (pEqn/x/divPhi) を探す
+    - 見つからなければ A_csr_*.dat から時刻を取る
     """
     case_path = Path(case_dir)
-    time_dirs = set()
-    
-    # Serial case: gnn/ directory
-    gnn_dir = case_path / 'gnn'
-    if gnn_dir.exists():
-        for f in gnn_dir.glob('pEqn_*'):
-            time_str = f.name.split('_')[1]
-            time_dirs.add(time_str)
-    
-    # Parallel case: processor*/gnn/ directories
-    for proc_dir in case_path.glob('processor*/gnn'):
-        for f in proc_dir.glob('pEqn_*'):
-            time_str = f.name.split('_')[1]
-            time_dirs.add(time_str)
-    
-    return sorted(time_dirs, key=lambda x: float(x))
+
+    # 探索するファイルパターン（順番に試す）
+    patterns = [
+        "pEqn_*_rank*.dat",   # 例: pEqn_10200_rank7.dat
+        "x_*_rank*.dat",      # 例: x_10200_rank7.dat
+        "divPhi_*_rank*.dat", # 例: divPhi_10200_rank7.dat
+        "A_csr_*.dat",        # 例: A_csr_10200.dat
+    ]
+
+    for pattern in patterns:
+        files = sorted(case_path.glob(pattern))
+        if not files:
+            continue  # このパターンでは何も見つからなかったので次へ
+
+        time_set = set()
+
+        for f in files:
+            name = f.name
+
+            if pattern == "A_csr_*.dat":
+                # A_csr_10200.dat -> "10200"
+                time_part = name[len("A_csr_"):-len(".dat")]
+            else:
+                # 例: pEqn_10200_rank7.dat
+                #     divPhi_10200_rank7.dat
+                #     x_10200_rank7.dat
+                # "_rank" の手前までを取り、その中から先頭の "pEqn_" / "x_" / "divPhi_" を除く
+                stem = name.split("_rank")[0]     # "pEqn_10200"
+                time_part = stem.split("_", 1)[1] # "10200"
+
+            time_set.add(time_part)
+
+        # 数値としてソート（10200, 10400, ...）
+        def _to_float(s: str):
+            try:
+                return float(s)
+            except ValueError:
+                return s
+
+        time_list = sorted(time_set, key=_to_float)
+
+        # デバッグ用ログ（不要なら消して OK）
+        print(f"[find_time_list] pattern '{pattern}' で {len(time_list)} 個の time を検出しました。")
+        return time_list
+
+    # どのパターンでも見つからなかった場合
+    print(f"[find_time_list] {case_dir} で既知パターンにマッチするファイルが見つかりませんでした。")
+    return []
+
 
 
 

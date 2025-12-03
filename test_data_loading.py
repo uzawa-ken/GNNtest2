@@ -9,6 +9,7 @@ Tests whether CFD data can be loaded correctly.
 import sys
 from pathlib import Path
 import numpy as np
+import inspect
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -31,8 +32,8 @@ def test_original_format():
     print("="*60)
 
     # Adjust these paths to your actual data location
-    data_dir = "../cylinder/work/data/gnn"  # Path to your gnn directory
-    rank_str = "0"  # Your rank string (check your file names)
+    data_dir = "../processor7/gnn"  # Path to your gnn directory
+    rank_str = "7"  # Your rank string (check your file names)
 
     print(f"Data directory: {data_dir}")
     print(f"Rank string: {rank_str}")
@@ -54,51 +55,85 @@ def test_original_format():
         print(f"  ... and {len(files) - 10} more files")
     print()
 
-    # Find available time steps
+    # ---------------------------------------------------------
+    # 1. 時刻リストの取得（find_time_list のシグネチャを見て呼び分け）
+    # ---------------------------------------------------------
     try:
-        time_list = find_time_list(data_dir, rank_str)
+        sig = inspect.signature(find_time_list)
+        n_params = len(sig.parameters)
+
+        if n_params == 1:
+            # 新しい実装: find_time_list(data_dir)
+            time_list = find_time_list(data_dir)
+        elif n_params >= 2:
+            # 古い実装: find_time_list(data_dir, rank_str)
+            time_list = find_time_list(data_dir, rank_str)
+        else:
+            raise RuntimeError(f"Unexpected signature for find_time_list: {sig}")
+
         print(f"✓ Found {len(time_list)} time steps")
         if len(time_list) > 0:
-            print(f"  Time steps: {time_list[:5]}")
+            print(f"  Time steps (first 5): {time_list[:5]}")
             if len(time_list) > 5:
                 print(f"  ... and {len(time_list) - 5} more")
         else:
             print("❌ No time steps found!")
             print(f"Expected files like: pEqn_*_rank{rank_str}.dat")
             return False
+
     except Exception as e:
         print(f"❌ Error finding time steps: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
-    # Try loading first time step
-    if len(time_list) > 0:
-        t = time_list[0]
-        print(f"\nLoading time step: {t}")
-        try:
+    # ---------------------------------------------------------
+    # 2. 最初の時刻ステップのデータ読み込み
+    # ---------------------------------------------------------
+    t = time_list[0]
+    print(f"\nLoading time step: {t}")
+
+    try:
+        # load_case_with_csr の引数の数も一応チェックしておく
+        sig_load = inspect.signature(load_case_with_csr)
+        n_params_load = len(sig_load.parameters)
+
+        if n_params_load == 2:
+            # 例: load_case_with_csr(data_dir, time_str)
+            data = load_case_with_csr(data_dir, t)
+        elif n_params_load >= 3:
+            # 例: load_case_with_csr(data_dir, time_str, rank_str)
             data = load_case_with_csr(data_dir, t, rank_str)
+        else:
+            raise RuntimeError(
+                f"Unexpected signature for load_case_with_csr: {sig_load}"
+            )
 
-            print(f"✓ Data loaded successfully!")
-            print(f"  Features shape: {data['feats_np'].shape}")
-            print(f"  Solution shape: {data['x_true_np'].shape}")
-            print(f"  Edge index shape: {data['edge_index_np'].shape}")
-            print(f"  CSR matrix nnz: {len(data['vals_np'])}")
-            print(f"  Number of cells: {data['feats_np'].shape[0]}")
+        print(f"✓ Data loaded successfully!")
+        print(f"  Features shape: {data['feats_np'].shape}")
+        print(f"  Solution shape: {data['x_true_np'].shape}")
+        print(f"  Edge index shape: {data['edge_index_np'].shape}")
+        print(f"  CSR matrix nnz: {len(data['vals_np'])}")
+        print(f"  Number of cells: {data['feats_np'].shape[0]}")
 
-            # Show feature ranges
-            feats = data['feats_np']
-            print(f"\n  Feature ranges:")
-            print(f"    Coordinates (x,y,z): [{feats[:,:3].min():.3f}, {feats[:,:3].max():.3f}]")
-            print(f"    Skewness: [{feats[:,5].min():.3f}, {feats[:,5].max():.3f}]")
-            print(f"    Non-orthogonality: [{feats[:,6].min():.3f}, {feats[:,6].max():.3f}]")
-            print(f"    Aspect ratio: [{feats[:,7].min():.3f}, {feats[:,7].max():.3f}]")
+        # Show feature ranges
+        feats = data['feats_np']
+        print(f"\n  Feature ranges:")
+        print(f"    Coordinates (x,y,z): "
+              f"[{feats[:, :3].min():.3f}, {feats[:, :3].max():.3f}]")
+        print(f"    Skewness: [{feats[:, 5].min():.3f}, {feats[:, 5].max():.3f}]")
+        print(f"    Non-orthogonality: "
+              f"[{feats[:, 6].min():.3f}, {feats[:, 6].max():.3f}]")
+        print(f"    Aspect ratio: "
+              f"[{feats[:, 7].min():.3f}, {feats[:, 7].max():.3f}]")
 
-            return True
+        return True
 
-        except Exception as e:
-            print(f"❌ Error loading data: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+    except Exception as e:
+        print(f"❌ Error loading data: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
     return True
 
@@ -107,7 +142,7 @@ def find_correct_rank():
     """
     Auto-detect the correct rank string from file names.
     """
-    data_dir = "../cylinder/work/data/gnn"
+    data_dir = "../processor7/gnn"
 
     if not Path(data_dir).exists():
         print(f"Directory not found: {data_dir}")
