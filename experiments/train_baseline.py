@@ -12,6 +12,7 @@ Baseline Training Script
 
 import sys
 import os
+import argparse
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -217,12 +218,38 @@ def evaluate(model, val_cases, config, device='cpu'):
 
 def main():
     """メイン訓練ループ"""
+    # コマンドライン引数のパース
+    parser = argparse.ArgumentParser(description='Baseline GNN Training')
+    parser.add_argument('--data_dir', type=str, default=None,
+                        help='Data directory path (default: from config)')
+    parser.add_argument('--rank_str', type=str, default=None,
+                        help='MPI rank string (default: from config)')
+    parser.add_argument('--epochs', type=int, default=None,
+                        help='Number of training epochs (default: from config)')
+    parser.add_argument('--lr', type=float, default=None,
+                        help='Learning rate (default: from config)')
+    parser.add_argument('--max_cases', type=int, default=None,
+                        help='Maximum number of cases to load (default: from config)')
+    args = parser.parse_args()
+
     print("="*60)
     print("Baseline Training - Using New Module Structure")
     print("="*60)
 
     # 設定の読み込み
     config = get_default_config()
+
+    # コマンドライン引数で設定を上書き
+    if args.data_dir is not None:
+        config.data.data_dir = args.data_dir
+    if args.rank_str is not None:
+        config.data.rank_str = args.rank_str
+    if args.epochs is not None:
+        config.training.num_epochs = args.epochs
+    if args.lr is not None:
+        config.training.learning_rate = args.lr
+    if args.max_cases is not None:
+        config.data.max_num_cases = args.max_cases
 
     # デバイスの設定
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
